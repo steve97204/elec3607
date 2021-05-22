@@ -26,6 +26,9 @@
  You should have received a copy of the GNU General Public License
  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
+#ifdef HAVE_CONFIG_H
+#include <config.h>
+#endif
 #include <getopt.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -35,13 +38,22 @@
 #include <stdint.h>
 #include <time.h>
 #include <fftw3.h>
-
+#include <assert.h>
 #include "fano.h"
 #include "jelinek.h"
 #include "nhash.h"
 #include "wsprd_utils.h"
 #include "wsprsim_utils.h"
+#include <pulse/simple.h>
+#include <pulse/error.h>
+#include <pulse/gccmacro.h>
 
+#define BUFSIZE 12000
+#include "tinywav.h"
+
+#define MAXTIME 120
+#define NUM_CHANNELS 1
+#define SAMPLE_RATE 12000
 #define max(x,y) ((x) > (y) ? (x) : (y))
 // Possible PATIENCE options: FFTW_ESTIMATE, FFTW_ESTIMATE_PATIENT,
 // FFTW_MEASURE, FFTW_PATIENT, FFTW_EXHAUSTIVE
@@ -111,13 +123,12 @@ unsigned long readwavfile(char *ptr_to_infile, int ntrmin, double *idat, double 
     unsigned int nfft1, nfft2, nh2;
     int i0;
     double df;
-    
     nfft2=46080; //this is the number of downsampled points that will be returned
     nh2=nfft2/2;
     
     if( ntrmin == 2 ) {
         nfft1=nfft2*32;      //need to downsample by a factor of 32
-        df=12000.0/nfft1;
+        df=12001.0/nfft1;
         i0=1500.0/df+0.5;
         npoints=114*12000;
     } else if ( ntrmin == 15 ) {
@@ -133,13 +144,43 @@ unsigned long readwavfile(char *ptr_to_infile, int ntrmin, double *idat, double 
     double *realin;
     fftw_complex *fftin, *fftout;
     
-    FILE *fp;
-    short int *buf2;
-    buf2 = malloc(npoints*sizeof(short int));
-    if(buf2==NULL){
-        return 1;
+FILE *fp;
+short int*buf2;
+buf2 = malloc(npoints*sizeof(buf2));
+if (buf2==NULL){
+	return 1;
+
+}
+    if (ptr_to_infile ==NULL){
+
+static const pa_sample_spec ss = {
+        .format = PA_SAMPLE_S16LE,
+        .rate = 12000,
+        .channels = 1
+    };
+    pa_simple *s = NULL;
+    int error;
+  	if (!(s = pa_simple_new(NULL, "wsprd", PA_STREAM_RECORD, NULL, "wsprrecord", &ss, NULL, NULL, &error))) {
+
+        fprintf(stderr, __FILE__": pa_simple_new() failed: %s\n", pa_strerror(error));
+        goto finish;
+	}
+
+	for (int i=0;i<1;i++){
+		if (pa_simple_read(s, buf2, npoints*sizeof(buf2[0]), &error) < 0) {
+            fprintf(stderr, __FILE__": pa_simple_read() failed: %s\n", pa_strerror(error));
+            goto finish;
+		}
+	    }
+	
+finish:
+
+    if (s)
+        pa_simple_free(s);
+    nr = npoints;
+
     }
-    
+    else{
     fp = fopen(ptr_to_infile,"rb");
     if (fp == NULL) {
         fprintf(stderr, "Cannot open data file '%s'\n", ptr_to_infile);
@@ -147,8 +188,10 @@ unsigned long readwavfile(char *ptr_to_infile, int ntrmin, double *idat, double 
     }
     nr=fread(buf2,2,22,fp);            //Read and ignore header
     nr=fread(buf2,2,npoints,fp);       //Read raw data
-
+    
     fclose(fp);
+    printf("1");
+    }
     if(nr!=npoints){
 		printf("Failed to read data file\n");
 		printf("requested: %lu got: %lu\n",npoints,nr);
@@ -660,7 +703,7 @@ int main(int argc, char *argv[])
     double minrms=52.0 * (symfac/64.0);      //Final test for plausible decoding
     delta=60;                                //Fano threshold step
     double bias=0.42;                        //Fano metric bias (used for both Fano and stack algorithms)
-    
+    int pulseselect = 0;
     t00=clock();
     fftw_complex *fftin, *fftout;
 #include "./metric_tables.c"
@@ -724,6 +767,9 @@ int main(int argc, char *argv[])
             case 'z':
                 bias=strtod(optarg,NULL); //fano metric bias (default is 0.42)
                 break;
+	case 'p':
+		pulseselect = 1;
+		break;
             case '?':
                 usage();
                 return 1;
@@ -733,14 +779,21 @@ int main(int argc, char *argv[])
     if( stackdecoder ) {
         stack=malloc(stacksize*sizeof(struct snode));
     }
-    
+    if(pulseselect == 1){
+    	ptr_to_infile=argv[optind];
+    }else{
     if( optind+1 > argc) {
         usage();
         return 1;
-    } else {
-        ptr_to_infile=argv[optind];
+      // if (!(s = pa_simple_new(NULL, argv[0], PA_STREAM_RECORD, NULL, "record", &ss, NULL, NULL, &error))) {
+       // fprintf(stderr, __FILE__": pa_simple_new() failed: %s\n", pa_strerror(error));
     }
     
+    else {
+        ptr_to_infile=argv[optind];
+    }
+    }
+
     // setup metric table
     for(i=0; i<256; i++) {
         mettab[0][i]=round( 10*(metric_tables[2][i]-bias) );
@@ -782,14 +835,13 @@ int main(int argc, char *argv[])
         fclose(ftimer);
     }
     ftimer=fopen(timer_fname,"w");
-    
+
     if( strstr(ptr_to_infile,".wav") ) {
         ptr_to_infile_suffix=strstr(ptr_to_infile,".wav");
         
         t0 = clock();
         npoints=readwavfile(ptr_to_infile, wspr_type, idat, qdat);
         treadwav += (double)(clock()-t0)/CLOCKS_PER_SEC;
-        
         if( npoints == 1 ) {
             return 1;
         }
@@ -802,10 +854,17 @@ int main(int argc, char *argv[])
         }
         dialfreq -= (dialfreq_error*1.0e-06);
     } else {
-        printf("Error: Failed to open %s\n",ptr_to_infile);
-        printf("WSPR file must have suffix .wav or .c2\n");
-        return 1;
-    }
+        //printf("Error: Failed to open %s\n",ptr_to_infile);
+        //printf("WSPR file must have suffix .wav or .c2\n");
+	t0 = clock();
+        npoints=readwavfile(NULL, wspr_type, idat, qdat);
+        treadwav += (double)(clock()-t0)/CLOCKS_PER_SEC;
+	ptr_to_infile_suffix = ".wav";
+        if( npoints == 1 ) {
+            return 1;
+        }
+        dialfreq=dialfreq_cmdline - (dialfreq_error*1.0e-06);
+   } 
     
     // Parse date and time from given filename
     strncpy(date,ptr_to_infile_suffix-11,6);
@@ -962,7 +1021,8 @@ int main(int argc, char *argv[])
             }
         }
         npk=i;
-        
+        printf("2");
+
         // bubble sort on snr, bringing freq along for the ride
         int pass;
         double tmp;
@@ -1000,7 +1060,7 @@ int main(int argc, char *argv[])
          span of 162 symbols, with deviation equal to 0 at the center of the
          signal vector.
          */
-
+	
         int idrift,ifr,if0,ifd,k0;
         int kindex;
         double smax,ss,pow,p0,p1,p2,p3;
