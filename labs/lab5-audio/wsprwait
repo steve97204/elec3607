@@ -1,9 +1,9 @@
 #!/bin/bash
 #
 
-set AUDIODEV=hw:1
+set AUDIODEV=hw:0
 
-DECODER=wsprcan/k9an-wsprd
+DECODER=wsprcan/k9an-wsprd 
 IQFILE="iq.wav"
 AUDIOFILE="audio.wav"
 
@@ -22,7 +22,6 @@ do
                 # convert to 16 bit mono
                 sox ${IQFILE} -c 1 -t wav -r 12000 -b 16 ${AUDIOFILE}
                 # decode WSPR
-		paplay ${IQFILE}&
                 ${DECODER} ${AUDIOFILE}
         elif ((10#$sec < 49)); then
                 sleep 10
