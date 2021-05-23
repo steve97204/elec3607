@@ -1,0 +1,10 @@
+#!/bin/bash
+#
+
+set AUDIODEV=hw:1
+
+DECODER=wsprcan/k9an-wsprd
+		pax11publish -d
+		pax11publish -r
+		paplay data/iq-16b.wav&
+                ${DECODER} -- 'p'
