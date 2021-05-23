@@ -16,7 +16,12 @@ void i2c_init()
 	if (i2c_file < 0)
 		exit(1);
 }
-
+int i2c_write(unsigned char reg, __u8 val)
+{
+	if(ioctl(i2c_file,I2C_SLAVE,SI5351_ADDR)<0)
+		exit(1);
+	i2c_smbus_write_byte_data(i2c_file,reg,val);
+}
 int i2c_read(unsigned char reg)
 {
 	if (ioctl(i2c_file, I2C_SLAVE, SI5351_ADDR) < 0) 
@@ -38,4 +43,20 @@ main()
 {
 	i2c_init();
 	i2c_read(0);
+	i2c_write(3,0xFF);
+	i2c_write(16,0x80);
+	i2c_write(17,0x80);
+		i2c_write(18,0x80);
+		i2c_write(19,0x80);
+		i2c_write(20,0x80);
+		i2c_write(21,0x80);
+		i2c_write(22,0x80);
+		i2c_write(23,0x80);
+	for (int i=0;i<SI5351A_REVB_REG_CONFIG_NUM_REGS-2;i++){
+		i2c_write(si5351a_revb_registers[i].address,si5351a_revb_registers[i].value);
+		printf("%d,",si5351a_revb_registers[i].value);
+	}
+		i2c_write(166,0x51);
+		i2c_write(177,0xAC);
+	i2c_write(3,0x00);
 }
